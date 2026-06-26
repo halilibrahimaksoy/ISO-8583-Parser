@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ISO 8583 Mesaj Parser</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2029; --panel2:#222b36; --line:#2e3a47;
+    --text:#e6edf3; --muted:#8b98a9; --accent:#4ca3ff; --accent2:#3ddc97;
+    --tlv:#ffb454; --warn:#ff6b6b; --chip:#2b3947;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px}
+  h1{font-size:22px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  h1 .badge{background:var(--accent);color:#04121f;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700}
+  .sub{color:var(--muted);margin:0 0 20px}
+  textarea{width:100%;min-height:130px;background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:10px;padding:14px;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:12.5px;resize:vertical;letter-spacing:.3px}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0 6px}
+  button{background:var(--accent);color:#04121f;border:none;padding:10px 18px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px}
+  button.sec{background:var(--chip);color:var(--text)}
+  button:hover{filter:brightness(1.08)}
+  label.opt{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer;user-select:none}
+  .err{background:#3a1d22;border:1px solid var(--warn);color:#ffd0d0;padding:10px 14px;border-radius:8px;margin-top:14px;white-space:pre-wrap;font-family:monospace}
+  .status{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border-radius:10px;margin:18px 0;font-weight:700;font-size:15px}
+  .status .ic{font-size:20px;line-height:1.2}
+  .status .rs{font-weight:400;font-size:12.5px;margin-top:4px;line-height:1.5;opacity:.92}
+  .status.ok{background:#16291f;border:1px solid var(--accent2);color:var(--accent2)}
+  .status.warn{background:#2e2616;border:1px solid var(--tlv);color:var(--tlv)}
+  .status.error{background:#3a1d22;border:1px solid var(--warn);color:#ff9a9a}
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}
+  .scard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:120px}
+  .scard .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .scard .v{font-size:18px;font-weight:700;font-family:monospace}
+  .scard.bank{background:#16242e;border-color:var(--accent)}
+  .scard.bank .v{color:var(--accent);font-family:'Segoe UI',sans-serif}
+  .scard .sub2{font-size:11px;color:var(--muted);margin-top:2px;font-family:'Segoe UI',sans-serif}
+  .bitmap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:18px;font-family:monospace;font-size:12.5px;word-break:break-all}
+  .bitmap .label{color:var(--muted);font-family:'Segoe UI',sans-serif;font-size:12px;margin-bottom:4px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{background:var(--chip);border:1px solid var(--line);padding:2px 8px;border-radius:6px;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin-bottom:8px}
+  .fld{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+  .fld .head{display:flex;align-items:center;gap:12px;padding:11px 16px;background:var(--panel2);border-bottom:1px solid var(--line)}
+  .fld .fno{background:var(--accent);color:#04121f;font-weight:700;border-radius:6px;padding:2px 9px;font-family:monospace;font-size:13px;min-width:42px;text-align:center}
+  .fld.tlvfld .fno{background:var(--tlv)}
+  .fld .fname{font-weight:600}
+  .fld .fmeta{color:var(--muted);font-size:12px;margin-left:auto;font-family:monospace}
+  .fld .body{padding:12px 16px}
+  .row{display:grid;grid-template-columns:140px 1fr;gap:8px;padding:3px 0;align-items:baseline}
+  .row .rk{color:var(--muted);font-size:12px}
+  .row .rv{font-family:monospace;word-break:break-all;font-size:13px}
+  .row .rv.val{color:var(--accent2);font-weight:600}
+  .row .rv.interp{color:var(--tlv)}
+  .tlv-table{margin-top:6px;font-size:12.5px}
+  .tlv-table th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:5px 8px;border-bottom:1px solid var(--line)}
+  .tlv-table td{padding:5px 8px;border-bottom:1px solid #232c36;vertical-align:top;font-family:monospace;word-break:break-all}
+  .tlv-table td.tag{color:var(--tlv);font-weight:700;white-space:nowrap}
+  .tlv-table td.tname{font-family:'Segoe UI',sans-serif;color:var(--text)}
+  .tlv-table td.tval{color:var(--accent2)}
+  .tlv-table td.tlen{color:var(--muted);white-space:nowrap}
+  .tlv-nested{margin-left:14px;border-left:2px solid var(--tlv);padding-left:10px}
+  .ascii{color:var(--muted);font-size:11px;margin-top:2px}
+  .footnote{color:var(--muted);font-size:12px;margin-top:24px;border-top:1px solid var(--line);padding-top:12px}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px}
+  .trailer{background:#2a2230;border:1px dashed var(--tlv)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ISO 8583 Parser <span class="badge">EMV / TLV</span></h1>
+  <p class="sub">ISO 8583 finansal mesajını ayrıştırır; bitmap, tüm alanlar ve F55 / F48 / F62 gibi TLV (Tag-Length-Value) alanlarını gösterir.</p>
+
+  <textarea id="input" spellcheck="false"></textarea>
+  <div class="controls">
+    <button onclick="run()">Ayrıştır (Parse)</button>
+    <button class="sec" onclick="loadSample()">Örnek Yükle</button>
+    <button class="sec" onclick="document.getElementById('input').value=''">Temizle</button>
+    <label class="opt"><input type="checkbox" id="secbit" checked> Bit 1 ayarlıysa ikincil bitmap'i oku</label>
+  </div>
+  <div id="out"></div>
+
+  <div class="footnote">
+    Kodlama varsayımı: sayısal alanlar (n) <b>BCD</b> (her bayt 2 hane), alfanümerik alanlar (an/ans) <b>ASCII</b>.
+    Değişken uzunluk önekleri BCD'dir (LLVAR = 1 bayt, LLLVAR = 2 bayt). TLV alanları BER-TLV (EMV) olarak çözülür.
+  </div>
+</div>
+
+<script>
+const SAMPLE = "0120703C04810EE08202165200190098057702950000000000001280001168132728062630060051060400013631373730353236303432313332363032323030545031303431353530303030303030303030303030303250594330303030373239363920202020505943535032313030303030303130303030303030303030094901639F10120810A74003020000000000000000904800FF9F3303E0F8C85F280207929A032606269F260800C3759B87A505A35F2A0209499F3501219F090200028407A0000000041010820239009F2701809F020600000000128057135200190098057702D30062011123498601000F9F360200AA9F34034403029F1A0207929F370401349C129F1E0830303030303930359C01005F340101950500000000005F240300000000400C00120001140000080001140000070000000000000E0010303030303631373730353236303432311034C721";
+
+// ---- ISO 8583 field dictionary (1987) ----
+// type: n (BCD numeric), an/ans (ASCII), b (binary hex), z (track), tlv (BER-TLV)
+// vlen: 0 fixed, 2 LLVAR, 3 LLLVAR
+const FIELDS = {
+  1:{n:"Secondary Bitmap",type:"b",len:8,vlen:0},
+  2:{n:"Primary Account Number (PAN)",type:"n",len:19,vlen:2},
+  3:{n:"Processing Code",type:"n",len:6,vlen:0},
+  4:{n:"Amount, Transaction",type:"n",len:12,vlen:0},
+  5:{n:"Amount, Settlement",type:"n",len:12,vlen:0},
+  6:{n:"Amount, Cardholder Billing",type:"n",len:12,vlen:0},
+  7:{n:"Transmission Date & Time (MMDDhhmmss)",type:"n",len:10,vlen:0},
+  9:{n:"Conversion Rate, Settlement",type:"n",len:8,vlen:0},
+  10:{n:"Conversion Rate, Cardholder Billing",type:"n",len:8,vlen:0},
+  11:{n:"System Trace Audit Number (STAN)",type:"n",len:6,vlen:0},
+  12:{n:"Time, Local Transaction (hhmmss)",type:"n",len:6,vlen:0},
+  13:{n:"Date, Local Transaction (MMDD)",type:"n",len:4,vlen:0},
+  14:{n:"Date, Expiration (YYMM)",type:"n",len:4,vlen:0},
+  15:{n:"Date, Settlement (MMDD)",type:"n",len:4,vlen:0},
+  16:{n:"Date, Conversion",type:"n",len:4,vlen:0},
+  18:{n:"Merchant Category Code",type:"n",len:4,vlen:0},
+  19:{n:"Acquiring Country Code",type:"n",len:3,vlen:0},
+  22:{n:"POS Entry Mode",type:"n",len:4,vlen:0},
+  23:{n:"Card Sequence Number",type:"n",len:3,vlen:0},
+  24:{n:"Network International ID (NII)",type:"n",len:3,vlen:0},
+  25:{n:"POS Condition Code",type:"n",len:2,vlen:0},
+  26:{n:"POS PIN Capture Code",type:"n",len:2,vlen:0},
+  28:{n:"Amount, Transaction Fee",type:"an",len:9,vlen:0},
+  32:{n:"Acquiring Institution ID Code",type:"n",len:11,vlen:2},
+  33:{n:"Forwarding Institution ID Code",type:"n",len:11,vlen:2},
+  35:{n:"Track 2 Data",type:"z",len:37,vlen:2},
+  37:{n:"Retrieval Reference Number (RRN)",type:"an",len:12,vlen:0},
+  38:{n:"Authorization ID Response",type:"an",len:6,vlen:0},
+  39:{n:"Response Code",type:"an",len:2,vlen:0},
+  40:{n:"Service Restriction Code",type:"an",len:3,vlen:0},
+  41:{n:"Card Acceptor Terminal ID",type:"ans",len:8,vlen:0},
+  42:{n:"Card Acceptor ID Code (Merchant ID)",type:"ans",len:15,vlen:0},
+  43:{n:"Card Acceptor Name/Location",type:"ans",len:40,vlen:0},
+  44:{n:"Additional Response Data",type:"ans",len:25,vlen:2},
+  45:{n:"Track 1 Data",type:"an",len:76,vlen:2},
+  48:{n:"Additional Data — Private (F48 TLV)",type:"ptlv",len:999,vlen:3},
+  49:{n:"Currency Code, Transaction",type:"n",len:4,vlen:0},
+  50:{n:"Currency Code, Settlement",type:"n",len:3,vlen:0},
+  51:{n:"Currency Code, Cardholder Billing",type:"n",len:3,vlen:0},
+  52:{n:"PIN Data",type:"b",len:8,vlen:0},
+  53:{n:"Security Related Control Info",type:"n",len:16,vlen:0},
+  54:{n:"Additional Amounts",type:"an",len:120,vlen:3},
+  55:{n:"ICC Data / EMV (BER-TLV)",type:"tlv",len:999,vlen:3},
+  56:{n:"Reserved ISO (BER-TLV)",type:"tlv",len:999,vlen:3},
+  57:{n:"QR Related Data",type:"ans",len:16,vlen:0},
+  58:{n:"Reserved National",type:"ans",len:999,vlen:3},
+  59:{n:"Reserved National",type:"ans",len:999,vlen:3},
+  60:{n:"Reserved Private (TLV)",type:"ptlv",len:999,vlen:3},
+  61:{n:"Reserved Private (TLV)",type:"ptlv",len:999,vlen:3},
+  62:{n:"Reply Print Data — Private (F62 TLV)",type:"ptlv",len:999,vlen:3},
+  63:{n:"Special Bilgi — Private (F63 TLV)",type:"ptlv",len:999,vlen:3},
+  64:{n:"Message Authentication Code (MAC)",type:"b",len:8,vlen:0},
+  90:{n:"Original Data Elements",type:"n",len:42,vlen:0},
+  95:{n:"Replacement Amounts",type:"an",len:42,vlen:0},
+  100:{n:"Receiving Institution ID Code",type:"n",len:11,vlen:2},
+  102:{n:"Account Identification 1",type:"ans",len:28,vlen:2},
+  103:{n:"Account Identification 2",type:"ans",len:28,vlen:2},
+  120:{n:"Reserved Private",type:"ans",len:999,vlen:3},
+  121:{n:"Reserved Private",type:"ans",len:999,vlen:3},
+  122:{n:"Reserved Private",type:"ans",len:999,vlen:3},
+  123:{n:"Reserved Private (TLV)",type:"ptlv",len:999,vlen:3},
+  128:{n:"Message Authentication Code (MAC)",type:"b",len:8,vlen:0},
+};
+
+// ---- EMV / BER-TLV tag dictionary ----
+const EMV = {
+ "4F":"Application Identifier (AID)","50":"Application Label","57":"Track 2 Equivalent Data",
+ "5A":"Application PAN","5F20":"Cardholder Name","5F24":"Application Expiration Date (YYMMDD)",
+ "5F25":"Application Effective Date","5F28":"Issuer Country Code","5F2A":"Transaction Currency Code",
+ "5F2D":"Language Preference","5F30":"Service Code","5F34":"PAN Sequence Number",
+ "5F36":"Transaction Currency Exponent","61":"Application Template","6F":"FCI Template",
+ "70":"Record Template","71":"Issuer Script Template 1","72":"Issuer Script Template 2",
+ "73":"Directory Discretionary Template","77":"Response Message Template Format 2",
+ "80":"Response Message Template Format 1","82":"Application Interchange Profile (AIP)",
+ "83":"Command Template","84":"Dedicated File (DF) Name / AID","87":"Application Priority Indicator",
+ "88":"Short File Identifier (SFI)","8A":"Authorization Response Code","8C":"CDOL1","8D":"CDOL2",
+ "8E":"Cardholder Verification Method (CVM) List","8F":"CA Public Key Index","90":"Issuer Public Key Certificate",
+ "91":"Issuer Authentication Data","92":"Issuer Public Key Remainder","93":"Signed Static Application Data",
+ "94":"Application File Locator (AFL)","95":"Terminal Verification Results (TVR)","97":"Transaction Certificate Data Object List (TDOL)",
+ "98":"Transaction Certificate (TC) Hash","99":"Transaction PIN Data","9A":"Transaction Date (YYMMDD)",
+ "9B":"Transaction Status Information (TSI)","9C":"Transaction Type","9D":"DDF Name",
+ "A5":"FCI Proprietary Template",
+ "9F01":"Acquirer Identifier","9F02":"Amount, Authorised (Numeric)","9F03":"Amount, Other (Numeric)",
+ "9F04":"Amount, Other (Binary)","9F05":"Application Discretionary Data","9F06":"Application Identifier (Terminal)",
+ "9F07":"Application Usage Control","9F08":"Application Version Number (ICC)","9F09":"Application Version Number (Terminal)",
+ "9F0B":"Cardholder Name Extended","9F0D":"Issuer Action Code - Default","9F0E":"Issuer Action Code - Denial",
+ "9F0F":"Issuer Action Code - Online","9F10":"Issuer Application Data (IAD)","9F11":"Issuer Code Table Index",
+ "9F12":"Application Preferred Name","9F13":"Last Online ATC Register","9F14":"Lower Consecutive Offline Limit",
+ "9F15":"Merchant Category Code","9F16":"Merchant Identifier","9F17":"PIN Try Counter",
+ "9F18":"Issuer Script Identifier","9F1A":"Terminal Country Code","9F1B":"Terminal Floor Limit",
+ "9F1C":"Terminal Identification","9F1D":"Terminal Risk Management Data","9F1E":"Interface Device (IFD) Serial Number",
+ "9F1F":"Track 1 Discretionary Data","9F20":"Track 2 Discretionary Data","9F21":"Transaction Time (hhmmss)",
+ "9F22":"CA Public Key Index","9F23":"Upper Consecutive Offline Limit","9F26":"Application Cryptogram (ARQC/TC/AAC)",
+ "9F27":"Cryptogram Information Data (CID)","9F2A":"Kernel Identifier","9F2D":"ICC PIN Encipherment Public Key Cert",
+ "9F2E":"ICC PIN Encipherment Public Key Exponent","9F2F":"ICC PIN Encipherment Public Key Remainder",
+ "9F32":"Issuer Public Key Exponent","9F33":"Terminal Capabilities","9F34":"CVM Results",
+ "9F35":"Terminal Type","9F36":"Application Transaction Counter (ATC)","9F37":"Unpredictable Number",
+ "9F38":"Processing Options Data Object List (PDOL)","9F39":"POS Entry Mode","9F3A":"Amount Reference Currency",
+ "9F3B":"Application Reference Currency","9F3C":"Transaction Reference Currency Code","9F3D":"Transaction Reference Currency Exponent",
+ "9F40":"Additional Terminal Capabilities","9F41":"Transaction Sequence Counter","9F42":"Application Currency Code",
+ "9F43":"Application Reference Currency Exponent","9F44":"Application Currency Exponent","9F45":"Data Authentication Code",
+ "9F46":"ICC Public Key Certificate","9F47":"ICC Public Key Exponent","9F48":"ICC Public Key Remainder",
+ "9F49":"Dynamic Data Authentication Data Object List (DDOL)","9F4A":"Static Data Authentication Tag List",
+ "9F4B":"Signed Dynamic Application Data","9F4C":"ICC Dynamic Number","9F4D":"Log Entry",
+ "9F4E":"Merchant Name and Location","9F4F":"Log Format","9F5B":"Issuer Script Results",
+ "9F66":"Terminal Transaction Qualifiers (TTQ)","9F6C":"Card Transaction Qualifiers (CTQ)","9F6E":"Form Factor Indicator",
+ "BF0C":"FCI Issuer Discretionary Data","DF8129":"Reserved (Kernel)",
+};
+// constructed (template) tags whose value is itself TLV
+const CONSTRUCTED = new Set(["61","6F","70","71","72","73","77","80","A5","BF0C","E0","E1","E2","E3"]);
+
+const CURRENCY = {"949":"TRY (Türk Lirası)","840":"USD","978":"EUR","826":"GBP (İngiliz Sterlini)","392":"JPY (Japon Yeni)","643":"RUB (Rus Rublesi)"};
+// Cevap kodları (BKM TechPOS Ekler - Cevap Kodları)
+const RESP = {"00":"İşlem Onaylandı","01":"Kartı Veren Bankayı Arayınız","02":"Kartı Veren Bankayı Arayınız (özel)",
+  "03":"Hatalı İşyeri","04":"Karta El Koy","05":"İşlem Onaylanmadı (Do not honour)","06":"Hata","07":"Karta El Koy (özel)",
+  "08":"Kimlik Kontrollü Onay","09":"Tekrar Deneyiniz","11":"İşlem Onaylandı (VIP)","12":"Geçersiz İşlem","13":"Geçersiz Tutar",
+  "14":"Hatalı Kart","15":"Kartı Veren Banka Tanımsız","25":"Kayıt Bulunamadı","28":"Orijinal İşlem Reddedilmiş",
+  "29":"Orijinal İşlem Bulunamadı","30":"Format Hatası","33":"Karta El Koy - Vadesi Geçmiş","36":"Karta El Koy - Kısıtlanmış",
+  "38":"Karta El Koy - Şifre Deneme Aşıldı","41":"Karta El Koy - Kayıp Kart","43":"Karta El Koy - Çalıntı Kart",
+  "51":"Yetersiz Bakiye","52":"Hesap Hatalı","53":"Hesap Hatalı","54":"Vadesi Geçmiş Kart","55":"Şifre Hatalı (Incorrect PIN)",
+  "57":"Kartın İşlem İzni Yok","58":"Terminalin İşlem İzni Yok","61":"Limit Aşımı (tutar)","62":"Kısıtlanmış Kart",
+  "63":"Güvenlik İhlali (Anahtar Değişimi gerekli)","65":"Limit Aşımı (sıklık)","75":"Şifre Deneme Sayısı Aşıldı",
+  "76":"Anahtar Senkronizasyon Hatası","77":"(Script) Talep Reddedildi","78":"Şifre Güvenilir Bulunmadı","79":"ARQC Hatası",
+  "85":"Şifre İşlemi Onaylandı","91":"Kartı Veren Banka Hizmet Dışı","92":"Banka Bağlantısı Bulunamadı",
+  "93":"Kart e-ticarete kapalı","95":"Günsonu Mutabakatı Başarısız (Batch Upload)","96":"Sistem Hatası",
+  "98":"İşlem İptal Edilmiş","99":"Acquirer Banka Hatalı",
+  "DC":"DCC Teklifi (kur seçtir)","KL":"Online Konfirmasyon Gerekli"};
+// Processing Code (F3) — BKM TechPOS Otorizasyon İsteği
+const PROCCODE = {"000000":"Satış","000001":"Online Imprinter","000002":"Loyalty Taksit","000003":"Loyalty Puan Kullanım",
+  "000004":"Loyalty Puan Sorgu","000005":"Vade Farklı Taksit","000006":"Vade Farklı Taksit Sorgu","000007":"Taksitlendirilemez Peşin Satış",
+  "000008":"DCC Satış","000009":"Çiftçi Kart Sorgu","000010":"Çiftçi Kart Satış","000011":"Çiftçi Kart Kampanyalı Satış",
+  "020000":"Satış İptal","020001":"Online Imprinter İptal","020002":"Lyl. Taksit İptal","020003":"Lyl. Puan Kullanım İptal",
+  "020005":"Vade Farklı Taksit İptal","020008":"DCC Satış İptal","020010":"Çiftçi Kart Satış İptal","020011":"Çiftçi K. Kampanyalı İptal",
+  "200000":"Eşlenikli İade","200001":"Eşleniksiz İade","220000":"Eşlenikli İade İptal","220001":"Eşleniksiz İade İptal",
+  "300000":"Ön Provizyon","300001":"Ön Provizyon Kapama","300002":"Batch Dışı Ön Prov. İptal","320000":"Ön Provizyon İptal","320001":"Ön Prov. Kapama İptal",
+  "400001":"QR Create","400002":"QR Get Card/FAST Data",
+  "810000":"Anahtar Değişim (Adım 1/2)","810001":"Anahtar Değişim (Adım 3/4)",
+  "900000":"Parametre Yükleme","900001":"Parametre Yükleme (Paket)","710000":"Handshake (param sonrası)","710001":"Handshake (periyodik)",
+  "910000":"Günsonu (First Reconciliation)","920000":"Günsonu (Second Reconciliation)"};
+// MTI sınıfı (BKM)
+const MTI_BKM = {"0100":"Finansal Olmayan Otorizasyon İsteği","0110":"Finansal Olmayan Otorizasyon Cevabı",
+  "0120":"Finansal Olmayan Advice / TC Upload İstek","0130":"Finansal Olmayan Advice / TC Upload Cevap",
+  "0200":"Finansal Otorizasyon İsteği","0210":"Finansal Otorizasyon Cevabı",
+  "0220":"Finansal Advice / TC Upload İstek","0230":"Finansal Advice / TC Upload Cevap",
+  "0320":"Batch Upload (Advice) İstek","0330":"Batch Upload (Advice) Cevap",
+  "0400":"Reversal (Teknik İptal) İstek","0410":"Reversal Cevap",
+  "0500":"End Of Day İstek","0510":"End Of Day Cevap",
+  "0800":"Network Yönetim İstek (Key/Param/Handshake/Sorgu)","0810":"Network Yönetim Cevap"};
+// Acquirer Banka Listesi (BKM TechPOS Ekler)
+const ACQUIRER = {"0046":"Akbank","0143":"Aktif Yatırım","0203":"Albaraka Türk","0124":"Alternatif Bank","0135":"Anadolubank",
+  "0125":"Burgan Bank","0092":"Citibank","0134":"Denizbank","0103":"Fibabanka","0111":"QNB Finansbank","0123":"HSBC",
+  "0109":"ICBC Turkey","0099":"ING Bank","6004":"İninal","0205":"Kuveyt Türk","0146":"Odea Bank","6002":"Papara","6003":"PTT",
+  "0059":"Şekerbank","0062":"Garanti BBVA","0012":"Halkbank","0064":"İş Bankası","0015":"Vakıfbank","0010":"Ziraat Bankası",
+  "6001":"Turk Elektronik Para","6005":"Turkcell Ödeme","0096":"Turkish Bank","0108":"Turkland Bank","0032":"TEB",
+  "0206":"Türkiye Finans","0210":"Vakıf Katılım","0067":"Yapı Kredi","0209":"Ziraat Katılım"};
+function acqName(id){ const k=(id||"").replace(/^0+/,"").padStart(4,"0"); return ACQUIRER[k]?(k+" — "+ACQUIRER[k]):("Kod "+(id||"")); }
+// CRC-32 (BKM TechPOS algoritması: poly 0xEDB88320, init 0xFFFFFFFF, LSB-first, sonuç ters)
+function crc32(bytes){
+  let crc=0xFFFFFFFF;
+  for(let bi=0;bi<bytes.length;bi++){
+    for(let bit=0;bit<8;bit++){
+      const carry=crc&1; crc=crc>>>1;
+      if(carry !== ((bytes[bi]>>bit)&1)) crc^=0xEDB88320;
+    }
+  }
+  crc=(~crc)>>>0;
+  return ("00000000"+crc.toString(16).toUpperCase()).slice(-8);
+}
+// ---- Özel TLV tag isimleri (alan bazlı; F48 / F62 / F63 ayrı namespace) ----
+const PTLV_NAMES = {
+ 48:{"01":"Son Tutar (Replacement Amount)","02":"Loyalty Kazanılan Puan","03":"Loyalty Son Taksit Sayısı",
+  "04":"Ekstre Öteleme (Ay)","05":"Tarihe Ekstre Öteleme","06":"Anında İndirim Tutarı","07":"Surcharge Tutar",
+  "09":"Çiftçi Kart Kredi Gerçekleşme Bilgileri","0A":"Reply Kart Açıklama (Tip/Domain/Marka)","0B":"Cevap Açıklama",
+  "0C":"Alt Cevap Kodu ve Açıklaması","0D":"Parametre Yükleme / Anahtar Değişim Sinyali","0E":"İşlem Makbuzu Formatı (slip şablonu)",
+  "0F":"Acquirer/Banka Referans Bilgisi","10":"Vade Farkı Bilgileri","11":"Anında İndirim Katkı Payları",
+  "12":"Kullanılabilir Puan Bilgisi","13":"Online Konfirmasyon Listesi","14":"Tekil Online Konfirmasyon",
+  "16":"Host Tarih ve Saat (HostDateTime)","17":"Taksit Bilgi","18":"QR Card Data","19":"QR Fast Data","1A":"QR Data",
+  "1B":"Single Tap Indicator","1C":"Müşteri Slip Tercihi","1D":"İşyeri Slip Tercihi","1E":"DCC Bilgileri",
+  "1F":"TechPOS Ek Veri Alanı","20":"TR-34 Host Key Block"},
+ 62:{"01":"Free Format Print Data 1","02":"Free Format Print Data 2","03":"Free Format Print Data 3",
+  "04":"Free Format Print Data 4","05":"Free Format Print Data 5","06":"Free Format Print Data 6","07":"Free Format Print Data 7"},
+ 63:{"01":"Terminal Challenge Number (TCN)","02":"Host Challenge Number (HCN)","03":"MMK(MSK)+MSK(TCN)","04":"MSK(HCN)",
+  "07":"Terminal Parametre Versiyon Listesi","08":"F062 Parametre Package Data Bilgi","09":"Parametre Paket Terminal Durumu",
+  "0A":"Loyalty Taksit Sayısı","0B":"Loyalty Puan Kullanım Tutarı","0C":"Batch ve İşlem No Bilgileri",
+  "0D":"Terminal Mali Hafıza TCKN/Vergi No","0E":"Orjinal Banka Referans Bilgisi","0F":"Terminal İletişim Tipi",
+  "10":"CVV2 / AMEX 4CSC","11":"Pos Günsonu Toplamları","12":"Anahtar Değişim Sinyali","13":"Terminal EMV Kernel Listesi",
+  "15":"GPRS Network Tipi","17":"MSK(OKK)","18":"Terminal PIN PAD Bilgisi","1A":"MSK(RSA Key Block)",
+  "1B":"F061 Statistics Package","1C":"İstatistik Paket Durumu","1D":"BKM RKL Sertifikası","1E":"RKL Random Number",
+  "20":"RKL Indikatörü","21":"Terminal RKL Sertifikası","22":"TC Upload İletişim İstatistikleri","23":"Terminal Yetenekleri",
+  "24":"İşlemde Kullanılan Puan Bilgisi","25":"İşlemde Seçilen Bölüm Bilgisi","26":"Online Konfirmasyon Geri Bildirimi",
+  "27":"Tekil Online Konfirmasyon Geri Bildirimi","2A":"Payment Transaction Processing Code","2B":"Acquirer Special Message",
+  "2C":"QR Reference Data","2D":"Additional Payment Fields","2F":"Single Tap Indicator","30":"Terminal Device Type",
+  "31":"DCC Reference","32":"Source Address","33":"TR-31 Anahtar Bloğu Desteği","34":"TR-34 Anahtar Bloğu Desteği",
+  "35":"Parametre Yükleme Nedeni","36":"Çiftçi Kart Kredi Bilgisi","37":"TR-31 ITMK(TMKNew)","38":"TR-31 TMK(TPKNew)"}};
+
+// ---------- helpers ----------
+function clean(h){ return (h||"").replace(/0x/gi,"").replace(/[^0-9a-fA-F]/g,"").toUpperCase(); }
+function hexToAscii(h){ let s=""; for(let i=0;i<h.length;i+=2){ const c=parseInt(h.substr(i,2),16); s+= (c>=32&&c<127)?String.fromCharCode(c):"."; } return s; }
+function hexToBytes(h){ const a=[]; for(let i=0;i+1<h.length;i+=2) a.push(parseInt(h.substr(i,2),16)); return a; }
+// Windows-1254 (Latin-5 / Türkçe) çözümleme — özel TLV metin alanları için
+const CP1254={0x80:"€",0x8A:"Š",0x8C:"Œ",0x9A:"š",0x9C:"œ",0x9F:"Ÿ",
+ 0xC7:"Ç",0xD0:"Ğ",0xD6:"Ö",0xDC:"Ü",0xDD:"İ",0xDE:"Ş",
+ 0xE7:"ç",0xF0:"ğ",0xF6:"ö",0xFC:"ü",0xFD:"ı",0xFE:"ş"};
+function cp1254(h){ let s=""; for(let i=0;i<h.length;i+=2){ const c=parseInt(h.substr(i,2),16); if(c>=32&&c<127)s+=String.fromCharCode(c); else if(CP1254[c])s+=CP1254[c]; else if(c>=0xA0&&c<=0xFF)s+=String.fromCharCode(c); else s+="·"; } return s; }
+function isPrintableHex(h){ if(!h)return false; let p=0; for(let i=0;i<h.length;i+=2){ const c=parseInt(h.substr(i,2),16); if((c>=32&&c<127)||CP1254[c]||c>=0xA0)p++; } return p/(h.length/2) > 0.6; }
+// Özel/proprietary TLV: 1 bayt tag + 2 bayt uzunluk (binary) + değer
+function parsePropTLV(hex){
+  const tags=[]; let i=0; let ok=true;
+  while(i+6<=hex.length){
+    const tag=hex.substr(i,2); const len=parseInt(hex.substr(i+2,4),16);
+    if(isNaN(len)){ ok=false; break; }
+    i+=6; const val=hex.substr(i,len*2); const truncated=val.length<len*2; i+=len*2;
+    tags.push({tag,len,val,truncated});
+    if(truncated){ ok=false; break; }
+  }
+  return {tags, remainder:hex.substr(i), ok: ok && tags.length>0 && (hex.length-i)<6};
+}
+function esc(s){ return (s+"").replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
+
+class Reader{
+  constructor(h){ this.h=h; this.p=0; }
+  rem(){ return this.h.length-this.p; }
+  take(nHex){ if(this.p+nHex>this.h.length) throw new Error("Mesaj beklenenden kısa (offset "+this.p/2+" baytta veri bitti)."); const s=this.h.substr(this.p,nHex); this.p+=nHex; return s; }
+}
+
+// ---------- BER-TLV parser ----------
+function parseTLV(hex){
+  const out=[]; let i=0;
+  while(i<hex.length-1){
+    // skip padding 00 / FF between TLVs
+    while(i<hex.length && (hex.substr(i,2)==="00")) { i+=2; }
+    if(i>=hex.length-1) break;
+    let tag=hex.substr(i,2); let t0=parseInt(tag,16); i+=2;
+    if((t0&0x1F)===0x1F){ let more=true; let guard=0; while(more && i<hex.length && guard++<4){ const b=parseInt(hex.substr(i,2),16); tag+=hex.substr(i,2); i+=2; more=(b&0x80)!==0; } }
+    if(i>=hex.length) { out.push({tag,len:0,val:"",err:"uzunluk yok"}); break; }
+    let lb=parseInt(hex.substr(i,2),16); i+=2; let len;
+    if(lb&0x80){ const nn=lb&0x7F; if(i+nn*2>hex.length){ out.push({tag,len:0,val:hex.substr(i),err:"uzunluk taşması"}); break;} len=parseInt(hex.substr(i,nn*2),16); i+=nn*2; }
+    else len=lb;
+    let val=hex.substr(i,len*2);
+    let truncated = val.length<len*2;
+    i+=len*2;
+    out.push({tag,len,val,truncated});
+  }
+  return out;
+}
+
+function renderTLV(list, depth){
+  let rows="";
+  for(const t of list){
+    const name = EMV[t.tag] || "(bilinmeyen tag)";
+    const isC = CONSTRUCTED.has(t.tag);
+    let valCell;
+    if(isC && t.val && t.val.length>=2){
+      const nested=parseTLV(t.val);
+      valCell = `<div class="tlv-nested">${tlvTableHTML(nested,depth+1)}</div>`;
+    } else {
+      const ascii = hexToAscii(t.val);
+      const interp = interpretEMV(t.tag,t.val);
+      valCell = `<span class="tval">${esc(t.val)||"<i style='color:#666'>boş</i>"}</span>`
+        + (interp?`<div class="ascii" style="color:var(--tlv)">→ ${esc(interp)}</div>`:"")
+        + (/[ -~]/.test(ascii)&&ascii.replace(/\./g,"").length>1?`<div class="ascii">ASCII: ${esc(ascii)}</div>`:"");
+    }
+    rows += `<tr><td class="tag">${esc(t.tag)}</td><td class="tname">${esc(name)}${t.err?` <span style="color:var(--warn)">[${t.err}]</span>`:""}</td><td class="tlen">${t.len}</td><td class="tval">${valCell}</td></tr>`;
+  }
+  return rows;
+}
+function tlvTableHTML(list,depth){
+  return `<table class="tlv-table"><thead><tr><th>Tag</th><th>İsim</th><th>Len</th><th>Değer</th></tr></thead><tbody>${renderTLV(list,depth||0)}</tbody></table>`;
+}
+function propTlvTableHTML(p, fieldNo){
+  const dict = PTLV_NAMES[fieldNo] || {};
+  let rows="";
+  for(const t of p.tags){
+    const name = dict[t.tag] || "(bilinmeyen tag)";
+    const txt = isPrintableHex(t.val) ? cp1254(t.val) : "";
+    const interp = interpretPtlv(fieldNo, t.tag, t.val);
+    rows += `<tr><td class="tag">${esc("0x"+t.tag)}</td><td class="tname">${esc(name)}</td><td class="tlen">${t.len}</td>`
+      + `<td class="tval">${esc(t.val)||"<i style='color:#666'>boş</i>"}${t.truncated?" <span style='color:var(--warn)'>[eksik]</span>":""}`
+      + (interp? `<div class="ascii" style="color:var(--tlv)">→ ${esc(interp)}</div>`:"")
+      + (txt&&txt.replace(/·/g,"").trim().length>1? `<div class="ascii" style="color:var(--accent2)">↳ ${esc(txt)}</div>`:"")
+      + `</td></tr>`;
+  }
+  let extra="";
+  if(p.remainder && p.remainder.length) extra=`<div class="ascii" style="color:var(--muted)">artan: ${esc(p.remainder)}</div>`;
+  return `<table class="tlv-table"><thead><tr><th>Tag</th><th>İsim</th><th>Len</th><th>Değer (hex / metin)</th></tr></thead><tbody>${rows}</tbody></table>${extra}`;
+}
+// Özel TLV değer yorumları (alan + tag bazlı)
+function interpretPtlv(field,tag,val){
+  if(!val) return "";
+  const amt = ()=> "Tutar: "+(parseInt(val,10)/100).toFixed(2);
+  if(field===48){
+    if(["01","02","06","07"].includes(tag)) return amt();
+    if(tag==="05"){ return "Tarih: "+val.substr(0,4)+"-"+val.substr(4,2)+"-"+val.substr(6,2); }
+    if(tag==="0A"){ const kt={C:"Kredi",D:"Debit",P:"Prepaid"},dm={O:"OnUs",D:"Yurt İçi",M:"Marka Paylaşım",F:"Yurt Dışı"},br={V:"Visa",M:"Mastercard",A:"AMEX",T:"Troy",D:"Diners",J:"JCB",C:"CUP"};
+      const a=hexToAscii(val); return (kt[a[0]]||a[0])+" / "+(dm[a[1]]||a[1])+" / "+(br[a[2]]||a[2]); }
+    if(tag==="0D"){ return "Param Yükleme sinyali="+val.substr(0,2)+", Anahtar Değişim sinyali="+val.substr(2,2); }
+    if(tag==="16"){ return val.substr(0,4)+"-"+val.substr(4,2)+"-"+val.substr(6,2)+" "+val.substr(8,2)+":"+val.substr(10,2)+":"+val.substr(12,2); }
+    if(tag==="1B"){ return val==="02"?"Online PIN Sor":"İşlemi sonlandır"; }
+    if(tag==="1C"||tag==="1D"){ const a=hexToAscii(val); return a==="D"?"Dijital Slip":"Slip basılsın"; }
+  }
+  if(field===63){
+    if(tag==="0C"){ return "Batch="+val.substr(0,6)+" / İşlem="+val.substr(6,6)+" / SonOnlineBatch="+val.substr(12,6)+" / SonOnlineİşlem="+val.substr(18,6); }
+    if(tag==="0A"){ return "Taksit: "+parseInt(val,16); }
+    if(tag==="0B"){ return amt(); }
+    if(tag==="20"){ return "RKL: "+(val.substr(0,2)==="01"?"destekliyor":"TechPos RSA"); }
+    if(tag==="23"){ return termCaps(val); }
+    if(tag==="25"){ return "Bölüm kodu: "+parseInt(val,16); }
+    if(tag==="30"){ const m={"00":"POS","01":"ÖKC","02":"Soft POS","03":"GMU (VUK 507)"}; return m[val]||"Device "+val; }
+    if(tag==="35"){ const m={"01":"Periodik","02":"Merkezi","03":"İlk kurulum"}; return m[val]||val; }
+    if(tag==="2A"){ return PROCCODE[val]||("Proc "+val); }
+  }
+  return "";
+}
+// F63 Tag 0x23 Terminal Yetenekleri (Byte1 + Byte2 bit alanları)
+function termCaps(val){
+  if(val.length<4) return "";
+  const b1=parseInt(val.substr(0,2),16), b2=parseInt(val.substr(2,2),16);
+  const C1=["Vade Farklı Satış","Online Konfirmasyon","EMV Puan","Puanlı Satış/Taksit","Bölümlü İşlem","Anında İndirim","Host Tarih/Saat","2.Faz Ön Tanımlı Slip"];
+  const C2=["Kare Kod Ödeme","EMV Kare Kod","8 hane BIN","12 hane Banka Ref","DCC","Çiftçi Kart","VCOMM2 URL","RFU"];
+  const on=[];
+  for(let i=0;i<8;i++) if(b1&(1<<i)) on.push(C1[i]);
+  for(let i=0;i<8;i++) if(b2&(1<<i)) on.push(C2[i]);
+  return on.length? ("Destek: "+on.join(", ")) : "Yetenek yok";
+}
+
+function interpretEMV(tag,val){
+  if(!val) return "";
+  if(tag==="9F02"||tag==="9F03"||tag==="81"){ const n=parseInt(val,10); return "Tutar: "+(n/100).toFixed(2); }
+  if(tag==="5F2A"||tag==="9F1A"||tag==="5F28"||tag==="9F42"){ const c=val.replace(/^0+/,"")||"0"; return CURRENCY[c.padStart(3,"0")]?("Kod "+val+" = "+CURRENCY[c.padStart(3,"0")]):("Kod "+val); }
+  if(tag==="9A"){ return "20"+val.substr(0,2)+"-"+val.substr(2,2)+"-"+val.substr(4,2); }
+  if(tag==="5F24"||tag==="5F25"){ return "20"+val.substr(0,2)+"-"+val.substr(2,2)+"-"+val.substr(4,2); }
+  if(tag==="9F21"){ return val.substr(0,2)+":"+val.substr(2,2)+":"+val.substr(4,2); }
+  if(tag==="9F36"){ return "ATC = "+parseInt(val,16); }
+  if(tag==="9F27"){ const c=parseInt(val,16); const m=(c&0xC0)===0x40?"TC (offline onay)":(c&0xC0)===0x80?"ARQC (online)":(c&0xC0)===0x00?"AAC (red)":"-"; return m; }
+  if(tag==="9C"){ const m={"00":"Satış (Goods/Services)","01":"Nakit avans","09":"Satış+nakit","20":"İade (Refund)"}; return m[val]||"İşlem tipi "+val; }
+  if(tag==="9F34"){ return "CVM sonucu"; }
+  if(tag==="84"||tag==="4F"){ if(val.startsWith("A000000004"))return "Mastercard"; if(val.startsWith("A000000003"))return "Visa"; if(val.startsWith("A000000025"))return "Amex"; if(val.startsWith("A000000152"))return "Discover"; return ""; }
+  if(tag==="57"||tag==="5A"){ const sep=val.indexOf("D"); if(sep>0){ return "PAN: "+val.substr(0,sep)+" | SKT: "+val.substr(sep+1,4); } }
+  return "";
+}
+
+// ---------- ISO field value interpretation ----------
+function interpretField(no,val){
+  switch(no){
+    case 2: return "Maskeli: "+val.substr(0,6)+"******"+val.slice(-4);
+    case 3: return (PROCCODE[val]?PROCCODE[val]+" · ":"")+"İşlem tipi "+val.substr(0,2)+" / Hesap(from) "+val.substr(2,2)+" / Hesap(to) "+val.substr(4,2);
+    case 4: case 5: case 6: return "Tutar: "+(parseInt(val,10)/100).toFixed(2);
+    case 7: return val.substr(0,2)+"/"+val.substr(2,2)+" "+val.substr(4,2)+":"+val.substr(6,2)+":"+val.substr(8,2);
+    case 12: return val.substr(0,2)+":"+val.substr(2,2)+":"+val.substr(4,2);
+    case 13: case 15: return val.substr(0,2)+"/"+val.substr(2,2)+" (AA/GG)";
+    case 14: return "20"+val.substr(0,2)+"-"+val.substr(2,2)+" (YY/AA)";
+    case 39: return RESP[val]||"";
+    case 49: case 50: case 51: { const c=val.replace(/^0+/,"")||"0"; return CURRENCY[c.padStart(3,"0")]?("Kod "+val+" = "+CURRENCY[c.padStart(3,"0")]):("Kod "+val); }
+    case 22: return posEntry(val);
+    case 32: case 33: case 100: return acqName(val);
+    case 35: case 45: { const s=val.indexOf("D"); if(s>0){ return "PAN: "+val.substr(0,s)+" | SKT: "+val.substr(s+1,4)+" | Servis kodu: "+val.substr(s+5,3); } return ""; }
+    case 43: return deviceInfo(val);
+    default: return "";
+  }
+}
+// F43 Cihaz Bilgi (an-40): SeriNo(16)+Vendor(3)+TermType(3)+AppVer(4)+OSVer(4)+AcquirerId(4)+RFU(6)
+function deviceInfo(v){
+  if(v.length<34) return "";
+  const seri=v.substr(0,16).trimEnd(), vendor=v.substr(16,3), term=v.substr(19,3),
+        app=v.substr(22,4), os=v.substr(26,4), acq=v.substr(30,4);
+  return "Seri No: "+seri+" | Üretici: "+vendor+" | Cihaz: "+term+" | App v"+app+" | OS v"+os+" | Acquirer: "+acqName(acq);
+}
+// F22 POS Entry Mode (n-4): hane0=RFU, hane1-2=PAN giriş, hane3=PIN yeteneği
+function posEntry(v){
+  const w=v.padStart(4,"0");
+  const pan={"00":"Bilinmiyor","01":"Manuel giriş","03":"TR Karekod","05":"Çipli/Temaslı EMV","07":"Temassız (Cless) EMV","80":"EMV Fallback","90":"Manyetik şerit","91":"Temassız Manyetik"};
+  const pinC={"0":"Bilinmiyor","1":"PIN kabul edebilir","2":"PIN kabul edemez","8":"PIN pad arızalı"};
+  const p=w.substr(1,2); const pin=w.substr(3,1);
+  return (pan[p]?("Giriş: "+pan[p]):"Giriş kodu "+p)+" | PIN: "+(pinC[pin]||pin);
+}
+
+// ---------- main parse ----------
+function parseISO(hex, readSecondary){
+  const r=new Reader(hex);
+  const res={mti:"",bitmapHex:"",fields:[],present:[],trailer:""};
+  res.mti=r.take(4);
+  let bm=r.take(16);
+  const b0=parseInt(bm.substr(0,2),16);
+  if(readSecondary && (b0&0x80)) bm+=r.take(16);
+  res.bitmapHex=bm;
+  // present fields
+  for(let i=0;i<bm.length/2;i++){
+    const b=parseInt(bm.substr(i*2,2),16);
+    for(let bit=0;bit<8;bit++){ if(b&(0x80>>bit)){ const f=i*8+bit+1; if(f!==1) res.present.push(f); } }
+  }
+  for(const f of res.present){
+    const spec=FIELDS[f];
+    if(!spec){ res.fields.push({no:f,name:"(tanımsız alan)",err:"Bu alan için tanım yok — ayrıştırma durdu.",lenInfo:"",raw:hex.substr(r.p)}); break; }
+    let lenUnits, lenInfo="sabit";
+    try{
+      if(spec.vlen===2){ const lh=r.take(2); lenUnits=parseInt(lh,10); lenInfo="LLVAR len="+lenUnits; }
+      else if(spec.vlen===3){ const lh=r.take(4); lenUnits=parseInt(lh,10); lenInfo="LLLVAR len="+lenUnits; }
+      else { lenUnits=spec.len; lenInfo="sabit "+spec.len; }
+
+      let raw,value,bytes;
+      if(spec.type==="n"){
+        const byteLen=Math.ceil(lenUnits/2); raw=r.take(byteLen*2);
+        value = raw.length>lenUnits ? raw.slice(-lenUnits) : raw; bytes=byteLen;
+      } else if(spec.type==="an"||spec.type==="ans"){
+        raw=r.take(lenUnits*2); value=hexToAscii(raw); bytes=lenUnits;
+      } else if(spec.type==="z"){
+        // Track data: BCD-packed (her bayt 2 hane, 'D' ayraç, 'F' dolgu nibble)
+        const byteLen=Math.ceil(lenUnits/2); raw=r.take(byteLen*2); value=raw; bytes=byteLen;
+      } else if(spec.type==="b"){
+        const byteLen = spec.vlen===0 ? spec.len : lenUnits; raw=r.take(byteLen*2); value=raw; bytes=byteLen;
+      } else if(spec.type==="tlv" || spec.type==="ptlv"){
+        raw=r.take(lenUnits*2); value=raw; bytes=lenUnits;
+      }
+      const fld={no:f,name:spec.name,type:spec.type,lenInfo,raw,value,bytes};
+      if(spec.type==="tlv") { fld.tlv=parseTLV(raw); }
+      else if(spec.type==="ptlv"){
+        const p=parsePropTLV(raw);
+        if(p.ok){ fld.ptlv=p; }
+        else { const b=parseTLV(raw); if(b.length && !b.some(t=>t.err)){ fld.tlv=b; } else { fld.ptlv=p; } }
+      }
+      fld.interp=interpretField(f,value);
+      res.fields.push(fld);
+    }catch(e){ res.fields.push({no:f,name:spec?spec.n||spec.name:"?",err:e.message,lenInfo,raw:""}); break; }
+  }
+  res.trailer=hex.substr(r.p);
+  // CRC-32: trailer tam 4 bayt ise mesaj sonu CRC'sidir; öncesindeki tüm baytlar üzerinden hesaplanır
+  if(res.trailer.length===8){
+    res.crcGiven=res.trailer;
+    res.crcCalc=crc32(hexToBytes(hex.substr(0, hex.length-8)));
+    res.crcOk=(res.crcGiven===res.crcCalc);
+  }
+  return res;
+}
+
+// ---------- işlem özeti: banka / kart bilgisi ----------
+function fieldVal(res,no){ const f=res.fields.find(x=>x.no===no && !x.err); return f?f.value:null; }
+function getPAN(res){
+  let p=fieldVal(res,2); if(p) return p;
+  const t2=fieldVal(res,35); if(t2){ const d=t2.indexOf("D"); return d>0?t2.substr(0,d):t2; }
+  const f55=res.fields.find(x=>x.no===55 && x.tlv);
+  if(f55) for(const t of f55.tlv){ if(t.tag==="5A") return t.val.replace(/F+$/i,""); if(t.tag==="57"){ const d=t.val.indexOf("D"); return d>0?t.val.substr(0,d):t.val; } }
+  return null;
+}
+function cardBrand(pan){
+  if(!pan||pan.length<2) return "";
+  const f1=pan[0], f2=pan.substr(0,2), b6=parseInt(pan.substr(0,6),10);
+  if(f1==="4") return "Visa";
+  if((b6>=979200&&b6<=979289)||(b6>=220500&&b6<=220529)) return "Troy";
+  if(f2==="34"||f2==="37") return "Amex";
+  if(f1==="5"||f1==="6"||(b6>=222100&&b6<=272099)) return "Mastercard";
+  return "Diğer";
+}
+function brandFromAID(res){
+  const f55=res.fields.find(x=>x.no===55 && x.tlv);
+  if(f55) for(const t of f55.tlv){ if(t.tag==="84"||t.tag==="4F"){ const v=t.val; if(v.startsWith("A000000004"))return "Mastercard"; if(v.startsWith("A000000003"))return "Visa"; if(v.startsWith("A000000152")||v.startsWith("A000000600"))return "Troy"; if(v.startsWith("A000000025"))return "Amex"; } }
+  return "";
+}
+// İşlemin geçtiği acquirer banka: F32 (öncelik) → F43 Default Acquirer Id (yedek)
+function getAcquirer(res){
+  let v=fieldVal(res,32);
+  if(v && /[1-9]/.test(v)) return {code:v.replace(/^0+/,"").padStart(4,"0"), src:"F32"};
+  const f43=fieldVal(res,43);
+  if(f43 && f43.length>=34){ const a=f43.substr(30,4); if(/[1-9]/.test(a)) return {code:a, src:"F43 (Default Acquirer)"}; }
+  if(v) return {code:v, src:"F32"};
+  return null;
+}
+// Yanıt mesajındaki F48 0x0A "Reply Kart Açıklama" → {tip, domain, marka}
+function replyCard(res){
+  const f48=res.fields.find(x=>x.no===48 && x.ptlv);
+  if(!f48) return null;
+  const t=f48.ptlv.tags.find(x=>x.tag==="0A"); if(!t) return null;
+  const a=hexToAscii(t.val);
+  const kt={C:"Kredi",D:"Debit",P:"Prepaid"}, dm={O:"OnUs (kart bankası = işyeri bankası)",D:"Yurt İçi",M:"Marka Paylaşım",F:"Yurt Dışı"}, br={V:"Visa",M:"Mastercard",A:"Amex",T:"Troy",D:"Diners",J:"JCB",C:"CUP"};
+  return {tip:kt[a[0]]||"", domain:dm[a[1]]||"", marka:br[a[2]]||""};
+}
+function summaryExtras(res){
+  let cards="";
+  const acq=getAcquirer(res);
+  if(acq){
+    const nm=ACQUIRER[acq.code];
+    cards+=`<div class="scard bank"><div class="k">İşlemin Geçtiği Banka (Acquirer)</div><div class="v">${esc(nm||("Kod "+acq.code))}</div><div class="sub2">${nm?("Kod "+acq.code):"tanımsız/test banka kodu"} · kaynak: ${esc(acq.src)}</div></div>`;
+  }
+  const rc=replyCard(res);
+  const pan=getPAN(res);
+  const brand=brandFromAID(res)||(rc&&rc.marka)||cardBrand(pan);
+  if(brand){
+    const sub=[];
+    if(rc&&rc.tip) sub.push(rc.tip);
+    if(rc&&rc.domain) sub.push(rc.domain);
+    else if(pan) sub.push("BIN "+pan.substr(0,6));
+    cards+=`<div class="scard"><div class="k">Kart Markası</div><div class="v" style="font-size:16px">${esc(brand)}</div>${sub.length?`<div class="sub2">${esc(sub.join(" · "))}</div>`:""}</div>`;
+  }
+  return cards;
+}
+// ---------- ayrıştırma durumu göstergesi ----------
+function statusInfo(res){
+  const errF=res.fields.filter(f=>f.err);
+  if(errF.length){
+    const f=errF[0]; const left=res.trailer?res.trailer.length/2:0;
+    return {level:"error",title:"Mesaj tamamen ayrıştırılamadı",
+      reasons:["F"+f.no+" alanında durdu: "+f.err, left?("çözülemeyen "+left+" bayt kaldı"):""].filter(Boolean)};
+  }
+  let level="ok"; const reasons=[];
+  if(res.trailer && res.trailer.length){
+    if(res.trailer.length===8){
+      if(res.crcOk) reasons.push("CRC-32 doğrulandı ("+res.crcCalc+")");
+      else { level="warn"; reasons.push("CRC eşleşmedi — hesaplanan "+res.crcCalc+", mesajdaki "+res.crcGiven); }
+    } else { level="warn"; reasons.push("sonda çözülemeyen "+(res.trailer.length/2)+" bayt fazladan veri var"); }
+  }
+  reasons.unshift(res.present.length+" alan başarıyla çözüldü");
+  return {level, title: level==="ok"?"Mesaj tamamen ayrıştırıldı":"Mesaj ayrıştırıldı — uyarı var", reasons};
+}
+function statusBanner(s){
+  const ic={ok:"✓",warn:"⚠",error:"✗"}[s.level];
+  return `<div class="status ${s.level}"><span class="ic">${ic}</span><div><div>${esc(s.title)}</div>`
+    + (s.reasons&&s.reasons.length?`<div class="rs">${s.reasons.map(esc).join(" · ")}</div>`:"")+`</div></div>`;
+}
+// ---------- render ----------
+function render(res){
+  let h=statusBanner(statusInfo(res));
+  h+=`<div class="summary">
+    <div class="scard"><div class="k">MTI</div><div class="v">${esc(res.mti)}</div></div>
+    <div class="scard"><div class="k">Alan Sayısı</div><div class="v">${res.present.length}</div></div>
+    <div class="scard"><div class="k">Bitmap</div><div class="v" style="font-size:13px">${res.bitmapHex.length*4} bit</div></div>
+    ${summaryExtras(res)}
+  </div>`;
+  h+=mtiBox(res.mti);
+  h+=`<div class="bitmap"><div class="label">Bitmap (hex)</div>${esc(res.bitmapHex)}
+    <div class="chips">${res.present.map(f=>`<span class="chip">F${f}</span>`).join("")}</div></div>`;
+
+  for(const f of res.fields){
+    const isTlv = f.tlv && f.tlv.length;
+    const isPtlv = f.ptlv && f.ptlv.tags.length;
+    h+=`<div class="fld ${(isTlv||isPtlv)?"tlvfld":""}">`;
+    h+=`<div class="head"><span class="fno">F${f.no}</span><span class="fname">${esc(f.name)}</span><span class="fmeta">${esc(f.lenInfo||"")}${f.bytes!=null?" · "+f.bytes+" bayt":""}</span></div>`;
+    h+=`<div class="body">`;
+    if(f.err){ h+=`<div class="err">${esc(f.err)}</div>`; if(f.raw) h+=`<div class="row"><span class="rk">Kalan ham veri</span><span class="rv">${esc(f.raw)}</span></div>`; }
+    else{
+      h+=`<div class="row"><span class="rk">Ham (hex)</span><span class="rv">${esc(f.raw)}</span></div>`;
+      if(isTlv){
+        h+=`<div class="row"><span class="rk">EMV TLV (${f.tlv.length} tag)</span><span class="rv">${tlvTableHTML(f.tlv,0)}</span></div>`;
+      } else if(isPtlv){
+        h+=`<div class="row"><span class="rk">Özel TLV (${f.ptlv.tags.length} tag)</span><span class="rv">${propTlvTableHTML(f.ptlv, f.no)}</span></div>`;
+      } else {
+        h+=`<div class="row"><span class="rk">Değer</span><span class="rv val">${esc(f.value)}</span></div>`;
+        if(f.interp) h+=`<div class="row"><span class="rk">Yorum</span><span class="rv interp">${esc(f.interp)}</span></div>`;
+      }
+    }
+    h+=`</div></div>`;
+  }
+  if(res.trailer && res.trailer.length){
+    const isCrc = res.trailer.length===8;
+    let crcRow="";
+    if(isCrc){
+      const ok=res.crcOk;
+      crcRow=`<div class="row"><span class="rk">Hesaplanan CRC</span><span class="rv">${esc(res.crcCalc)}</span></div>
+      <div class="row"><span class="rk">Doğrulama</span><span class="rv" style="font-weight:700;color:${ok?"var(--accent2)":"var(--warn)"}">${ok?"✓ CRC EŞLEŞTİ — mesaj bütünlüğü doğru":"✗ CRC EŞLEŞMEDİ — mesaj bozuk veya eksik"}</span></div>`;
+    }
+    h+=`<div class="fld trailer"><div class="head"><span class="fno" style="background:${isCrc&&res.crcOk?"var(--accent2)":"var(--tlv)"};color:#04121f">${isCrc?"CRC":"⋯"}</span><span class="fname">${isCrc?"CRC-32 (Mesaj sonu)":"Artık / Trailer veri"}</span><span class="fmeta">${res.trailer.length/2} bayt</span></div>
+      <div class="body"><div class="row"><span class="rk">Ham (hex)</span><span class="rv">${esc(res.trailer)}</span></div>${crcRow}
+      <div class="row"><span class="rk">Not</span><span class="rv interp">${isCrc?"BKM TechPOS: Message Type + Bitmap + Data Elements üzerinden hesaplanan 4 baytlık CRC-32 (poly 0xEDB88320).":"Bitmap'te işaretli alanlardan sonra kalan veri (MAC, dolgu veya mesaj sonu olabilir)."}</span></div></div></div>`;
+  }
+  return h;
+}
+
+function mtiBox(mti){
+  if(mti.length<4) return "";
+  const ver={"0":"ISO 8583:1987","1":"ISO 8583:1993","2":"ISO 8583:2003","8":"Ulusal","9":"Özel"};
+  const cls={"1":"Authorization","2":"Financial","3":"File Action","4":"Reversal/Chargeback","5":"Reconciliation","6":"Administrative","7":"Fee Collection","8":"Network Management"};
+  const fn={"0":"Request","1":"Request Response","2":"Advice","3":"Advice Response","4":"Notification","5":"Notification Ack"};
+  const org={"0":"Acquirer","1":"Acquirer Repeat","2":"Issuer","3":"Issuer Repeat","4":"Other","5":"Other Repeat"};
+  const d=mti.split("");
+  const bkm = MTI_BKM[mti] ? `<div class="ascii" style="color:var(--tlv);margin-top:6px">BKM TechPOS: ${esc(MTI_BKM[mti])}</div>` : "";
+  return `<div class="bitmap"><div class="label">MTI çözümü — ${esc(mti)}</div>
+    <div class="chips">
+    <span class="chip">Sürüm: ${ver[d[0]]||d[0]}</span>
+    <span class="chip">Sınıf: ${cls[d[1]]||d[1]}</span>
+    <span class="chip">Fonksiyon: ${fn[d[2]]||d[2]}</span>
+    <span class="chip">Kaynak: ${org[d[3]]||d[3]}</span>
+    </div>${bkm}</div>`;
+}
+
+// ---------- BKM mesaj başlığı (header) ----------
+// Yapı: Len(2) + HostID(1) + SubHeaderLen(1) + [EncInd(1) VendorID(1) GİBSeriNo(12) RFU(4) MType(2) PCode(3)]
+function parseHeader(hex){
+  if(hex.length<28) return null;
+  const msgLen=parseInt(hex.substr(0,4),16);
+  if(isNaN(msgLen) || hex.length!==(msgLen+2)*2) return null;       // uzunluk alanı tüm mesajla eşleşmeli
+  const subLen=parseInt(hex.substr(6,2),16);
+  if(subLen<7 || subLen>128 || 8+subLen*2>hex.length) return null;
+  const enc=parseInt(hex.substr(8,2),16);
+  if(enc!==0 && enc!==1) return null;
+  return { msgLen, hostId:parseInt(hex.substr(4,2),16), subLen, enc,
+    vendor:parseInt(hex.substr(10,2),16), gib:hexToAscii(hex.substr(12,24)).trimEnd(),
+    rfu:hexToAscii(hex.substr(36,8)), mtype:hex.substr(44,4), pcode:hex.substr(48,6),
+    bodyHex:hex.substr(8+subLen*2) };
+}
+function renderHeader(hd){
+  const enc = hd.enc===1 ? "1 — Şifreli (3DES-CBC)" : "0 — Şifresiz (Clear)";
+  return `<div class="bitmap"><div class="label">BKM Mesaj Başlığı (Header)</div>
+    <div class="chips">
+    <span class="chip">Mesaj Uzunluk: ${hd.msgLen} bayt</span>
+    <span class="chip">Host ID: ${hd.hostId}</span>
+    <span class="chip">Sub-Header: ${hd.subLen} bayt</span>
+    <span class="chip" style="background:${hd.enc?"#3a2230":"#22302a"}">Şifreleme: ${esc(enc)}</span>
+    <span class="chip">Vendor ID: ${hd.vendor}</span>
+    <span class="chip">GİB Seri No: ${esc(hd.gib)}</span>
+    <span class="chip">MType: ${esc(hd.mtype)}</span>
+    <span class="chip">PCode: ${esc(hd.pcode)}${PROCCODE[hd.pcode]?" ("+esc(PROCCODE[hd.pcode])+")":""}</span>
+    </div></div>`;
+}
+function bannerError(title,reason){
+  return `<div class="status error"><span class="ic">✗</span><div><div>${esc(title)}</div>${reason?`<div class="rs">${esc(reason)}</div>`:""}</div></div>`;
+}
+function run(){
+  const out=document.getElementById("out");
+  const hex=clean(document.getElementById("input").value);
+  if(!hex){ out.innerHTML=bannerError("Mesaj girilmedi","Lütfen bir ISO 8583 mesajı (hex) girin."); return; }
+  if(hex.length<20){ out.innerHTML=bannerError("Mesaj tamamen ayrıştırılamadı","Mesaj çok kısa — en az MTI + bitmap (10 bayt) gerekir."); return; }
+  try{
+    const sec=document.getElementById("secbit").checked;
+    const hd=parseHeader(hex);
+    if(hd){
+      let html=renderHeader(hd);
+      if(hd.enc===1){
+        html=bannerError("Mesaj tamamen ayrıştırılamadı","Gövde şifreli (3DES-CBC, MSK altında) — anahtar olmadan ISO alanları çözülemez. Yalnızca başlık okunabildi.")+html;
+        html+=`<div class="fld trailer"><div class="head"><span class="fno" style="background:var(--warn);color:#fff">🔒</span><span class="fname">Şifreli Gövde</span><span class="fmeta">${hd.bodyHex.length/2} bayt</span></div>
+          <div class="body"><div class="row"><span class="rk">Ham (hex)</span><span class="rv">${esc(hd.bodyHex)}</span></div>
+          <div class="row"><span class="rk">Not</span><span class="rv interp">Gövde, Message Session Key (MSK) altında 3DES-CBC ile şifreli. Anahtar olmadan açılamaz; ISO alanları gösterilemez.</span></div></div></div>`;
+      } else {
+        html+=render(parseISO(hd.bodyHex, sec));
+      }
+      out.innerHTML=html;
+    } else {
+      out.innerHTML=render(parseISO(hex, sec));
+    }
+  }catch(e){
+    out.innerHTML=bannerError("Mesaj tamamen ayrıştırılamadı","Ayrıştırma hatası: "+e.message);
+  }
+}
+function loadSample(){ document.getElementById("input").value=SAMPLE; run(); }
+
+// init
+loadSample();
+</script>
+</body>
+</html>
