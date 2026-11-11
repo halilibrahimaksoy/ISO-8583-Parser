@@ -15,6 +15,7 @@ BKM başlığı algılanırsa yalnızca başlıktan sonraki gövde çözülür; 
 ## Özellikler
 
 - **MTI + bitmap** çözümü, F1–F128 alan tanımları, BKM MTI/processing/cevap kodu açıklamaları
+- **TechPOS alan adları:** bitmap listesinde ve alan başlıklarında Türkçe açıklamalar (ör. **F2 Kart Numarası**, **F43 Cihaz Bilgisi**); F62 adı parametre yükleme cevaplarında **Parametre Paket Verisi** olarak gösterilir. Dokümandaki alanların dışındakiler için genel ISO adları kullanılır.
 - **Kodlama:** sayısal alanlar BCD, alfanümerik ASCII, Track 2 (F35) BCD-packed, LLVAR/LLLVAR
 - **EMV (F55/F56):** BER-TLV (çok-baytlı tag, nested template'ler), ~150 tag sözlüğü
 - **Özel TLV (F48/F62/F63):** 1-bayt tag + 2-bayt uzunluk; CP1254 (Türkçe) metin çözümü; alan bazlı tag isim sözlükleri

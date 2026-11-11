@@ -57,13 +57,13 @@
   .bitmap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:18px;font-family:monospace;font-size:12.5px;word-break:break-all}
   .bitmap .label{color:var(--muted);font-family:'Segoe UI',sans-serif;font-size:12px;margin-bottom:4px}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-  .chip{background:var(--chip);border:1px solid var(--line);padding:2px 8px;border-radius:6px;font-size:12px}
+  .chip{background:var(--chip);border:1px solid var(--line);padding:2px 8px;border-radius:6px;font-size:12px;word-break:normal}
   table{width:100%;border-collapse:collapse;margin-bottom:8px}
   .fld{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
-  .fld .head{display:flex;align-items:center;gap:12px;padding:11px 16px;background:var(--panel2);border-bottom:1px solid var(--line)}
+  .fld .head{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:11px 16px;background:var(--panel2);border-bottom:1px solid var(--line)}
   .fld .fno{background:var(--accent);color:#04121f;font-weight:700;border-radius:6px;padding:2px 9px;font-family:monospace;font-size:13px;min-width:42px;text-align:center}
   .fld.tlvfld .fno{background:var(--tlv)}
-  .fld .fname{font-weight:600}
+  .fld .fname{font-weight:600;flex:1 1 180px}
   .fld .fmeta{color:var(--muted);font-size:12px;margin-left:auto;font-family:monospace}
   .fld .body{padding:12px 16px}
   .row{display:grid;grid-template-columns:140px 1fr;gap:8px;padding:3px 0;align-items:baseline}
@@ -189,6 +189,45 @@ const FIELDS = {
   123:{n:"Reserved Private (TLV)",type:"ptlv",len:999,vlen:3},
   128:{n:"Message Authentication Code (MAC)",type:"b",len:8,vlen:0},
 };
+
+// ---- BKM TechPOS V3.2.2 alan adları ----
+// Kaynak: mesaj tabloları (s. 16–118), Reversal (s. 93–96),
+// F43/F48/F62/F63 ekleri (s. 152–171). Diğer alanlarda ISO sözlüğü kullanılır.
+const TECHPOS_FIELD_NAMES = {
+  2:"Kart Numarası",
+  3:"İşlem Kodu (Processing Code)",
+  4:"İşlem Tutarı",
+  11:"İşlem Takip Numarası (STAN)",
+  12:"Kaynaktaki İşlem Saati",
+  13:"Kaynaktaki İşlem Tarihi",
+  14:"Kart Son Kullanma Tarihi",
+  22:"Kart Giriş Yöntemi (POS Entry Mode)",
+  25:"POS Durum Kodu (POS Condition Code)",
+  32:"Acquirer Banka Kodu",
+  35:"Track II Verisi",
+  37:"İşlem Referans Numarası (RRN)",
+  38:"Otorizasyon Kodu",
+  39:"Cevap Kodu",
+  41:"Acquirer Terminal ID",
+  42:"Acquirer İşyeri No",
+  43:"Cihaz Bilgisi",
+  48:"Cevap Özel Bilgisi (Reply Special Bilgi)",
+  49:"Para Birimi Kodu",
+  52:"PIN Bloğu",
+  55:"EMV Çip Verisi",
+  57:"Karekod İlişkili Veri (QR Related Data)",
+  61:"İstatistik Paket Verisi",
+  62:"Baskı Verisi (Reply Print Data)",
+  63:"Özel Bilgi (Special Bilgi)"
+};
+function fieldName(no, res){
+  // F62: parametre yükleme cevapları (s. 43, 45); diğer mesajlarda slip verisi.
+  if(no===62 && res && res.mti==="0810"){
+    const proc=fieldVal(res,3);
+    if(proc==="900000" || proc==="900001") return "Parametre Paket Verisi";
+  }
+  return TECHPOS_FIELD_NAMES[no] || (FIELDS[no] && FIELDS[no].n) || "(tanımsız alan)";
+}
 
 // ---- EMV / BER-TLV tag dictionary ----
 const EMV = {
@@ -539,7 +578,7 @@ function parseISO(hex, readSecondary){
       } else if(spec.type==="tlv" || spec.type==="ptlv"){
         raw=r.take(lenUnits*2); value=raw; bytes=lenUnits;
       }
-      const fld={no:f,name:spec.name,type:spec.type,lenInfo,raw,value,bytes};
+      const fld={no:f,name:fieldName(f,res),type:spec.type,lenInfo,raw,value,bytes};
       if(spec.type==="tlv") { fld.tlv=parseTLV(raw); }
       else if(spec.type==="ptlv"){
         const p=parsePropTLV(raw);
@@ -548,7 +587,7 @@ function parseISO(hex, readSecondary){
       }
       fld.interp=interpretField(f,value);
       res.fields.push(fld);
-    }catch(e){ res.fields.push({no:f,name:spec?spec.n||spec.name:"?",err:e.message,lenInfo,raw:""}); break; }
+    }catch(e){ res.fields.push({no:f,name:fieldName(f,res),err:e.message,lenInfo,raw:""}); break; }
   }
   res.trailer=hex.substr(r.p);
   // CRC-32: trailer tam 4 bayt ise mesaj sonu CRC'sidir; öncesindeki tüm baytlar üzerinden hesaplanır
@@ -626,7 +665,7 @@ function statusInfo(res){
   if(errF.length){
     const f=errF[0]; const left=res.trailer?res.trailer.length/2:0;
     return {level:"error",title:"Mesaj tamamen ayrıştırılamadı",
-      reasons:["F"+f.no+" alanında durdu: "+f.err, left?("çözülemeyen "+left+" bayt kaldı"):""].filter(Boolean)};
+      reasons:["F"+f.no+" "+f.name+" alanında durdu: "+f.err, left?("çözülemeyen "+left+" bayt kaldı"):""].filter(Boolean)};
   }
   let level="ok"; const reasons=[];
   if(res.trailer && res.trailer.length){
@@ -654,7 +693,7 @@ function render(res){
   </div>`;
   h+=mtiBox(res.mti);
   h+=`<div class="bitmap"><div class="label">Bitmap (hex)</div>${esc(res.bitmapHex)}
-    <div class="chips">${res.present.map(f=>`<span class="chip">F${f}</span>`).join("")}</div></div>`;
+    <div class="chips">${res.present.map(f=>`<span class="chip">F${f} ${esc(fieldName(f,res))}</span>`).join("")}</div></div>`;
 
   for(const f of res.fields){
     const isTlv = f.tlv && f.tlv.length;
