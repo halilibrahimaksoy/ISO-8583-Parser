@@ -24,6 +24,22 @@
   button.sec{background:var(--chip);color:var(--text)}
   button:hover{filter:brightness(1.08)}
   label.opt{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer;user-select:none}
+  [hidden]{display:none!important}
+  .input-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .input-head>label{font-weight:600}
+  .message-mode{display:flex;gap:4px;border:1px solid var(--line);border-radius:9px;padding:4px;margin:0;min-width:0}
+  .message-mode label{position:relative;cursor:pointer}
+  .message-mode input{position:absolute;opacity:0;width:1px;height:1px}
+  .message-mode span{display:block;padding:6px 12px;border-radius:6px;color:var(--muted)}
+  .message-mode input:checked+span{background:var(--accent);color:#04121f;font-weight:700}
+  .message-mode input:focus-visible+span{outline:2px solid var(--text);outline-offset:2px}
+  .crypto-panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+  .crypto-panel label{display:block;font-weight:600;margin-bottom:6px}
+  .crypto-panel input{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:monospace;font-size:13px}
+  .crypto-panel input:focus{outline:none;border-color:var(--accent)}
+  .input-help{color:var(--muted);font-size:12px;margin:6px 0 0;overflow-wrap:anywhere}
+  button:disabled{opacity:.6;cursor:wait}
+  .decrypted-hex{font-family:monospace;overflow-wrap:anywhere;margin-top:8px;font-size:12px}
   .err{background:#3a1d22;border:1px solid var(--warn);color:#ffd0d0;padding:10px 14px;border-radius:8px;margin-top:14px;white-space:pre-wrap;font-family:monospace}
   .status{display:flex;align-items:flex-start;gap:12px;padding:13px 16px;border-radius:10px;margin:18px 0;font-weight:700;font-size:15px}
   .status .ic{font-size:20px;line-height:1.2}
@@ -74,11 +90,25 @@
   <h1>ISO 8583 Parser <span class="badge">EMV / TLV</span></h1>
   <p class="sub">ISO 8583 finansal mesajını ayrıştırır; bitmap, tüm alanlar ve F55 / F48 / F62 gibi TLV (Tag-Length-Value) alanlarını gösterir.</p>
 
-  <textarea id="input" spellcheck="false"></textarea>
+  <div class="input-head">
+    <label for="input">ISO mesajı / gövdesi (hex)</label>
+    <fieldset class="message-mode" aria-label="Mesajın şifreleme durumu">
+      <label><input type="radio" name="messageMode" id="modeClear" value="decrypted" checked><span>Decrypted (Açık)</span></label>
+      <label><input type="radio" name="messageMode" id="modeEncrypted" value="encrypted"><span>Encrypted (Şifreli)</span></label>
+    </fieldset>
+  </div>
+  <textarea id="input" spellcheck="false" aria-describedby="inputHint" placeholder="ISO 8583 mesajını hex olarak yapıştırın"></textarea>
+  <p id="inputHint" class="input-help">Başlık içeren mesaj veya yalnızca ISO gövdesi girilebilir.</p>
+  <fieldset id="cryptoPanel" class="crypto-panel" hidden disabled>
+    <legend>AES-256 anahtarı</legend>
+    <label for="aesKey">Key (64 hex karakter / 32 bayt)</label>
+    <input type="password" id="aesKey" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="cryptoHint" placeholder="256-bit anahtarı hex olarak girin">
+    <p id="cryptoHint" class="input-help">AES-256-CBC · IV: 00000000000000000000000000000000 · PKCS#7 padding.<br>Anahtar yalnızca bu sayfada kullanılır; kaydedilmez veya bir sunucuya gönderilmez.</p>
+  </fieldset>
   <div class="controls">
-    <button onclick="run()">Ayrıştır (Parse)</button>
+    <button id="parseButton" onclick="run()">Ayrıştır (Parse)</button>
     <button class="sec" onclick="loadSample()">Örnek Yükle</button>
-    <button class="sec" onclick="document.getElementById('input').value=''">Temizle</button>
+    <button class="sec" onclick="clearMessage()">Temizle</button>
     <label class="opt"><input type="checkbox" id="secbit" checked> Bit 1 ayarlıysa ikincil bitmap'i oku</label>
   </div>
   <div id="out"></div>
@@ -694,7 +724,7 @@ function parseHeader(hex){
     bodyHex:hex.substr(8+subLen*2) };
 }
 function renderHeader(hd){
-  const enc = hd.enc===1 ? "1 — Şifreli (3DES-CBC)" : "0 — Şifresiz (Clear)";
+  const enc = hd.enc===1 ? "1 — Şifreli (Encrypted)" : "0 — Şifresiz (Clear)";
   return `<div class="bitmap"><div class="label">BKM Mesaj Başlığı (Header)</div>
     <div class="chips">
     <span class="chip">Mesaj Uzunluk: ${hd.msgLen} bayt</span>
@@ -710,33 +740,119 @@ function renderHeader(hd){
 function bannerError(title,reason){
   return `<div class="status error"><span class="ic">✗</span><div><div>${esc(title)}</div>${reason?`<div class="rs">${esc(reason)}</div>`:""}</div></div>`;
 }
-function run(){
-  const out=document.getElementById("out");
-  const hex=clean(document.getElementById("input").value);
-  if(!hex){ out.innerHTML=bannerError("Mesaj girilmedi","Lütfen bir ISO 8583 mesajı (hex) girin."); return; }
-  if(hex.length<20){ out.innerHTML=bannerError("Mesaj tamamen ayrıştırılamadı","Mesaj çok kısa — en az MTI + bitmap (10 bayt) gerekir."); return; }
+// Web Crypto AES-CBC doğrulanmış PKCS#7 dolgusunu otomatik kaldırır.
+// ISO gövdesi ikili baytlardır; UTF-8 metin dönüşümü yapılmaz.
+function strictHex(value,label){
+  const hex=(value||"").trim().replace(/^0x/i,"").replace(/\s+/g,"");
+  if(!hex) throw new Error(label+" girilmedi.");
+  if(!/^[0-9a-f]+$/i.test(hex)) throw new Error(label+" yalnızca hex karakterleri (0-9, A-F) içermelidir.");
+  if(hex.length%2) throw new Error(label+" çift sayıda hex karakter içermelidir.");
+  return hex.toUpperCase();
+}
+async function decryptISOBody(cipherHex,keyInput){
+  const hex=strictHex(cipherHex,"Şifreli gövde");
+  const keyHex=strictHex(keyInput,"AES anahtarı");
+  if(keyHex.length!==64) throw new Error("AES-256 anahtarı 32 bayt (64 hex karakter) olmalıdır.");
+  if(hex.length%32) throw new Error("Şifreli gövdenin uzunluğu 16 baytın katı olmalıdır (AES-CBC).");
+  if(!globalThis.crypto?.subtle){
+    throw new Error("Bu ortamda Web Crypto kullanılamıyor. Sayfayı güncel bir tarayıcıda HTTPS, localhost veya yerel dosya olarak açın.");
+  }
+  const keyBytes=new Uint8Array(hexToBytes(keyHex));
+  let plaintext;
   try{
-    const sec=document.getElementById("secbit").checked;
-    const hd=parseHeader(hex);
-    if(hd){
-      let html=renderHeader(hd);
-      if(hd.enc===1){
-        html=bannerError("Mesaj tamamen ayrıştırılamadı","Gövde şifreli (3DES-CBC, MSK altında) — anahtar olmadan ISO alanları çözülemez. Yalnızca başlık okunabildi.")+html;
-        html+=`<div class="fld trailer"><div class="head"><span class="fno" style="background:var(--warn);color:#fff">🔒</span><span class="fname">Şifreli Gövde</span><span class="fmeta">${hd.bodyHex.length/2} bayt</span></div>
-          <div class="body"><div class="row"><span class="rk">Ham (hex)</span><span class="rv">${esc(hd.bodyHex)}</span></div>
-          <div class="row"><span class="rk">Not</span><span class="rv interp">Gövde, Message Session Key (MSK) altında 3DES-CBC ile şifreli. Anahtar olmadan açılamaz; ISO alanları gösterilemez.</span></div></div></div>`;
-      } else {
-        html+=render(parseISO(hd.bodyHex, sec));
-      }
-      out.innerHTML=html;
-    } else {
-      out.innerHTML=render(parseISO(hex, sec));
-    }
+    const key=await crypto.subtle.importKey("raw",keyBytes,{name:"AES-CBC"},false,["decrypt"]);
+    plaintext=new Uint8Array(await crypto.subtle.decrypt(
+      {name:"AES-CBC",iv:new Uint8Array(16)},key,new Uint8Array(hexToBytes(hex))
+    ));
+    return Array.from(plaintext,b=>b.toString(16).padStart(2,"0")).join("").toUpperCase();
   }catch(e){
-    out.innerHTML=bannerError("Mesaj tamamen ayrıştırılamadı","Ayrıştırma hatası: "+e.message);
+    throw new Error("AES-256-CBC ile şifre çözülemedi. Anahtarı, şifreli gövdeyi, sıfır IV ve PKCS#7 padding kullanımını kontrol edin.");
+  }finally{
+    keyBytes.fill(0);
+    if(plaintext) plaintext.fill(0);
   }
 }
-function loadSample(){ document.getElementById("input").value=SAMPLE; run(); }
+let runVersion=0;
+function updateParseButton(busy=false){
+  const button=document.getElementById("parseButton");
+  button.disabled=busy;
+  button.textContent=busy ? "Şifre çözülüyor…" :
+    (document.getElementById("modeEncrypted").checked ? "Şifreyi Çöz ve Ayrıştır" : "Ayrıştır (Parse)");
+}
+function invalidateResult(){
+  runVersion++;
+  document.getElementById("out").innerHTML="";
+  updateParseButton();
+}
+function updateMessageMode(){
+  invalidateResult();
+  const encrypted=document.getElementById("modeEncrypted").checked;
+  const panel=document.getElementById("cryptoPanel");
+  panel.hidden=!encrypted;
+  panel.disabled=!encrypted;
+  if(!encrypted) document.getElementById("aesKey").value="";
+  document.getElementById("input").placeholder=encrypted ?
+    "AES-256-CBC ile şifrelenmiş gövdeyi veya başlıklı mesajı hex olarak yapıştırın" :
+    "ISO 8583 mesajını hex olarak yapıştırın";
+}
+async function run(){
+  const version=++runVersion;
+  const out=document.getElementById("out");
+  const encrypted=document.getElementById("modeEncrypted").checked;
+  const sec=document.getElementById("secbit").checked;
+  let headerHtml="";
+  out.innerHTML="";
+  try{
+    const input=document.getElementById("input").value;
+    if(!input.trim()) throw new Error("Lütfen bir ISO 8583 mesajı (hex) girin.");
+    const hex=encrypted ? strictHex(input,"Şifreli mesaj") : clean(input);
+    if(hex.length%2) throw new Error("Mesaj çift sayıda hex karakter içermelidir.");
+    const hd=parseHeader(hex);
+    headerHtml=hd ? renderHeader(hd) : "";
+    let bodyHex=hd ? hd.bodyHex : hex;
+    let decryptionHtml="";
+    if(encrypted){
+      updateParseButton(true);
+      bodyHex=await decryptISOBody(bodyHex,document.getElementById("aesKey").value);
+      // Kullanıcı girdiyi değiştirir veya temizlerse eski sonuç ekrana yazılmaz.
+      if(version!==runVersion) return;
+      if(bodyHex.length<20 || !/^\d{4}/.test(bodyHex)){
+        throw new Error("Çözülen gövde geçerli bir ISO 8583 MTI + bitmap içermiyor. Anahtarı ve mesaj biçimini kontrol edin.");
+      }
+      decryptionHtml='<div class="bitmap"><div class="label">AES-256-CBC · IV: sıfır · PKCS#7 dolgu kaldırıldı</div>'
+        +'<details><summary>Çözülen ISO gövdesi (hex) · '+bodyHex.length/2+' bayt</summary>'
+        +'<div class="decrypted-hex">'+esc(bodyHex)+'</div></details></div>';
+    }else if(hd?.enc===1){
+      out.innerHTML=bannerError("Gövde şifreli","AES-256-CBC ile çözmek için Encrypted (Şifreli) seçeneğini seçip anahtarı girin.")+headerHtml;
+      return;
+    }
+    if(bodyHex.length<20) throw new Error("Mesaj çok kısa — en az MTI + bitmap (10 bayt) gerekir.");
+    out.innerHTML=headerHtml+decryptionHtml+render(parseISO(bodyHex,sec));
+  }catch(e){
+    if(version===runVersion){
+      out.innerHTML=bannerError(encrypted ? "Şifre çözme / ayrıştırma başarısız" : "Mesaj tamamen ayrıştırılamadı",e.message)+headerHtml;
+    }
+  }finally{
+    if(version===runVersion) updateParseButton();
+  }
+}
+function clearMessage(){
+  invalidateResult();
+  document.getElementById("input").value="";
+  document.getElementById("aesKey").value="";
+}
+function loadSample(){
+  document.getElementById("modeClear").checked=true;
+  document.getElementById("modeEncrypted").checked=false;
+  updateMessageMode();
+  document.getElementById("input").value=SAMPLE;
+  return run();
+}
+document.getElementById("modeClear").addEventListener("change",updateMessageMode);
+document.getElementById("modeEncrypted").addEventListener("change",updateMessageMode);
+document.getElementById("input").addEventListener("input",invalidateResult);
+document.getElementById("aesKey").addEventListener("input",invalidateResult);
+document.getElementById("secbit").addEventListener("change",invalidateResult);
 
 // init — açılışta otomatik ayrıştırma yapılmaz; mesaj girilip "Ayrıştır"a basılır
 // (örnek mesaj için "Örnek Yükle" butonu kullanılabilir)
